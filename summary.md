@@ -1,16 +1,120 @@
-Innovations and Heuristics in Register Coalescing for Graph-Coloring Register Allocation
 
-Executive Summary
+<!-- Beautified summary.md: structured, with headings and bullet lists -->
 
-Global register allocation, traditionally modeled as a graph-coloring problem, faces a critical trade-off between eliminating unnecessary copy instructions and maintaining the "colorability" of the interference graph. The provided sources outline the evolution of register coalescing—the process of merging the source and target nodes of a copy instruction—from foundational aggressive strategies to sophisticated modern heuristics.
+# Innovations and Heuristics in Register Coalescing
 
-Critical Takeaways:
+## Executive Summary
 
-* The Coalescing Dilemma: While coalescing reduces code size and improves execution time by removing copies, it can increase the degree of nodes in an interference graph, leading to more "spills" (moving data to memory), which are far more costly than the copies removed.
-* Traditional Heuristics: Strategies like Conservative and Iterated Coalescing aim to prevent spills by only coalescing when colorability is guaranteed. However, these methods are often too cautious, missing opportunities to exploit the "positive impact" of coalescing—where merging nodes actually reduces the interference degree of their common neighbors.
-* Optimistic Coalescing: This approach aggressively coalesces nodes but includes a mechanism to "undo" the merge during the selection phase if a node is marked for spilling. By splitting a coalesced node back into its original components, the allocator can often color at least one part, reducing total spill costs.
-* Coloring-Based Coalescing: A newer paradigm that uses a "trial coloring" with an extended number of registers to identify "companion nodes." Nodes that receive the same color in the trial are coalesced for the final allocation, as their shared interference structure suggests they can safely coexist in the same register.
-* Performance Impact: Experiments across VLIW and Java environments indicate that advanced coalescing (Optimistic and Coloring-based) can reduce static spill costs by 6% to 18% and improve execution time by up to 15% compared to baseline or conservative models.
+Global register allocation models the problem as a graph-coloring task and must balance two competing goals:
+
+- eliminate copy instructions (coalescing) to reduce dynamic instruction count and improve performance
+- avoid spilling (moving values to memory), which is usually far more expensive than keeping a temporary for a short time
+
+This summary condenses the main ideas from five foundational papers and highlights the practical trade-offs that guide modern allocators.
+
+## Quick Takeaways
+
+- Coalescing can be both helpful and harmful: merging two nodes reduces copies but may increase the merged node's degree, causing spills.
+- Conservative heuristics avoid creating uncolorable graphs but miss many safe coalescing opportunities.
+- Optimistic coalescing coalesces aggressively and undoes merges later if they cause spills — often reducing the overall spill cost.
+- Coloring-based coalescing uses a trial coloring (with extra colors) to identify "companions" that are safe to coalesce after splitting.
+- Empirical results in the literature show non-trivial spill reductions and runtime improvements when using optimistic or coloring-based strategies.
+
+---
+
+## Foundations: the Interference Graph
+
+- **Nodes** — live ranges (variables/temporaries).
+- **Edges** — two nodes interfere when their lifetimes overlap and thus cannot share a register.
+- **Colors (K)** — the number of physical registers available.
+
+### Chaitin-style allocation (overview)
+
+1. Build the interference graph from liveness analysis.
+2. (Optional) Coalesce copy-related non-interfering nodes.
+3. Simplify: repeatedly remove nodes with degree < K and push them onto a stack.
+4. Spill decision: when only degree ≥ K nodes remain, choose a spill candidate (commonly minimizing cost/degree).
+5. Select: pop the stack and assign colors; any node that cannot be colored becomes an actual spill (insert loads/stores and retry).
+
+---
+
+## The Coalescing Trade-off
+
+Coalescing affects neighbors' degrees in two opposite ways:
+
+- **Negative impact**: The merged node inherits the union of neighbors → its degree increases and may break colorability.
+- **Positive impact**: A shared neighbor that interferes with both operands loses one interfering edge after coalescing → its degree decreases and may become colorable.
+
+Deciding when to coalesce is therefore a cost/benefit trade-off.
+
+---
+
+## Evolution of Coalescing Heuristics
+
+### Aggressive Coalescing (early work)
+
+- Coalesce any non-interfering copy pair.
+- *Pro*: maximizes copy elimination.
+- *Con*: can create high-degree nodes and force spills.
+
+### Conservative Coalescing (Briggs et al.)
+
+- Coalesce only when simple heuristics predict colorability is preserved.
+- *Pro*: avoids turning a colorable graph uncolorable.
+- *Con*: overly cautious — many safe coalesces are missed.
+
+### Iterated Coalescing (George & Appel)
+
+- Interleave conservative coalescing with simplification so that degrees can drop and unlock more coalesces.
+
+### Optimistic Coalescing (Park & Moon)
+
+- Aggressively coalesce first; if a coalesced node becomes an actual spill during select, undo the coalesce and try coloring/splitting the parts separately.
+- This usually reduces total spill cost because splitting a spilled merged node often allows at least one part to be colored.
+
+### Coloring-Based Coalescing (Odaira et al.)
+
+- Perform a *trial coloring* with extra colors; copy-related subranges that receive the same trial color are *companions* and are good coalescing candidates.
+- This approach uses trial coloring to safely coalesce groups of subranges after splitting.
+
+---
+
+## Live-Range Splitting (Cooper & Simpson)
+
+- Splitting a live range permits keeping values in registers for hot regions while spilling or storing them in cold regions.
+- Use a containment graph to detect when one live range contains another (e.g., a loop-enclosing value) and compare the cost of splitting vs. spilling (loads + stores).
+
+Decision example: if the split cost (added loads/stores) is less than the cost of spilling the entire range — especially when spilling would insert a load inside a hot loop — prefer splitting.
+
+---
+
+## Practical Notes & Experimental Results
+
+- Optimistic and coloring-based coalescing often reduce spill code and improve runtime compared with conservative strategies; the magnitude depends on code shape and target architecture.
+- Simple spill heuristics such as cost/degree remain effective and are commonly used in production allocators.
+
+## Running the Demos
+
+The repository contains short, self-contained Python demos in the `Implementation/` folder. Each script prints step-by-step traces for quick educational runs:
+
+```bash
+python Implementation/chaitin_coloring.py
+python Implementation/linear_scan.py
+python Implementation/live_range_splitting.py
+python Implementation/optimistic_coalescing.py
+python Implementation/coloring_based_coalescing.py
+```
+
+## References
+
+- Chaitin, G. J. (1982). *Register Allocation & Spilling via Graph Coloring*.
+- Poletto, M., & Sarkar, V. (1999). *Linear Scan Register Allocation*.
+- Cooper, K. D., & Simpson, L. T. (1998). *Live Range Splitting in a Graph Coloring Register Allocator*.
+- Park, J., & Moon, S. M. (2004). *Optimistic Register Coalescing*.
+- Odaira, R., et al. (2010). *Coloring-Based Coalescing for Graph Coloring Register Allocation*.
+
+For full papers see the `Research Paper/` folder and for runnable demos see the `Implementation/` folder.
+
 
 
 --------------------------------------------------------------------------------
